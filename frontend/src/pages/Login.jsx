@@ -35,7 +35,7 @@ const Login = () => {
         {/* Animated background elements */}
         <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-fuchsia-500 rounded-full mix-blend-screen filter blur-[100px] opacity-40 animate-blob"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-cyan-500 rounded-full mix-blend-screen filter blur-[120px] opacity-40 animate-blob animation-delay-2000"></div>
-        
+
         <div className="relative z-10 text-white max-w-lg">
           <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
             <FaCity className="text-7xl mb-8 text-cyan-400 drop-shadow-[0_0_15px_rgba(34,211,238,0.6)]" />
@@ -52,8 +52,8 @@ const Login = () => {
       {/* Right side - Login Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 sm:p-12 relative">
         <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-indigo-600 rounded-full mix-blend-screen filter blur-[150px] opacity-10"></div>
-        
-        <motion.div 
+
+        <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.5 }}
@@ -65,7 +65,7 @@ const Login = () => {
               Don't have an account? <Link to="/register" className="font-semibold text-cyan-500 hover:text-cyan-400 transition-colors">Create one now</Link>
             </p>
           </div>
-          
+
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-5">
               <div>
@@ -81,11 +81,13 @@ const Login = () => {
                   />
                 </div>
               </div>
-              
+
               <div>
                 <div className="flex justify-between mb-2">
                   <label className="block text-sm font-medium dark:text-slate-300 text-slate-700">Password</label>
-                  <a href="#" className="text-sm font-semibold text-fuchsia-500 hover:text-fuchsia-400 transition-colors">Forgot password?</a>
+                  <Link to="/forgot-password" className="text-sm font-semibold text-fuchsia-500 hover:text-fuchsia-400 transition-colors">
+                    Forgot password?
+                  </Link>
                 </div>
                 <div className="relative">
                   <input

@@ -1,53 +1,67 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const issueSchema = new mongoose.Schema({
+const issueSchema = new mongoose.Schema(
+  {
     title: {
-        type: String,
-        required: true,
+      type: String,
+      required: true,
     },
     description: {
-        type: String,
-        required: true,
+      type: String,
+      required: true,
     },
     category: {
-        type: String,
-        required: true,
-        enum: ['Pothole', 'Garbage', 'Water Leakage', 'Streetlight', 'Other'],
+      type: String,
+      required: true,
+      enum: [
+        "Pothole",
+        "Garbage",
+        "Water Leakage",
+        "Streetlight",
+        "Dirty Washroom",
+        "Drainage / Sewage",
+        "Damaged Road",
+        "Stray Animals",
+        "Encroachment",
+        "Other",
+      ],
     },
     latitude: {
-        type: Number,
-        required: false,
+      type: Number,
+      required: false,
     },
     longitude: {
-        type: Number,
-        required: false,
+      type: Number,
+      required: false,
     },
     image: {
-        type: String,
-        required: false,
+      type: String,
+      required: false,
     },
     status: {
-        type: String,
-        enum: ['Pending', 'Assigned', 'In Progress', 'Resolved'],
-        default: 'Pending',
+      type: String,
+      enum: ["Pending", "Assigned", "In Progress", "Resolved"],
+      default: "Pending",
     },
     department: {
-        type: String,
-        required: true,
+      type: String,
+      required: true,
     },
     priority: {
-        type: Number,
-        default: 1,
+      type: Number,
+      default: 1,
     },
     reportsCount: {
-        type: Number,
-        default: 1,
+      type: Number,
+      default: 1,
     },
     user: {
-        type: mongoose.Schema.Types.ObjectId,
-        required: true,
-        ref: 'User',
-    }
-}, { timestamps: true });
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      ref: "User",
+    },
+  },
+  { timestamps: true },
+);
 
-module.exports = mongoose.model('Issue', issueSchema);
+module.exports = mongoose.model("Issue", issueSchema);
