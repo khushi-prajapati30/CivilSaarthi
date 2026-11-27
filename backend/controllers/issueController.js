@@ -65,7 +65,44 @@ function getDepartment(category) {
   }
 }
 
-// @desc    Analyze uploaded civic issue image with Gemini 2.5 Flash Vision
+// Helper: fetch available generateContent models, prioritizing fast/lite models less prone to 503 spikes
+async function getAvailableVisionModels(apiKey) {
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+    );
+    const data = await response.json();
+    if (!data.models) return [];
+
+    const valid = data.models
+      .filter(
+        (m) =>
+          Array.isArray(m.supportedGenerationMethods) &&
+          m.supportedGenerationMethods.includes("generateContent") &&
+          m.name.includes("gemini") &&
+          !m.name.includes("embedding") &&
+          !m.name.includes("tts") &&
+          !m.name.includes("image") &&
+          !m.name.includes("thinking"),
+      )
+      .map((m) => m.name.replace("models/", ""));
+
+    // Prioritize 'lite' and '2.0-flash' models before congested 'latest' or 'pro' models
+    return valid.sort((a, b) => {
+      const score = (name) => {
+        if (name.includes("lite")) return 1;
+        if (name.includes("2.0-flash")) return 2;
+        if (name.includes("flash")) return 3;
+        return 4;
+      };
+      return score(a) - score(b);
+    });
+  } catch {
+    return [];
+  }
+}
+
+// @desc    Analyze uploaded civic issue image with Gemini Vision
 // @route   POST /api/issues/analyze-image
 // @access  Private
 exports.analyzeIssueImage = async (req, res) => {
@@ -76,41 +113,15 @@ exports.analyzeIssueImage = async (req, res) => {
         .json({ message: "Please upload or capture an image to analyze" });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
       fs.unlink(req.file.path, () => {});
       return res
         .status(500)
         .json({ message: "GEMINI_API_KEY is missing in backend .env" });
     }
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: SchemaType.OBJECT,
-          properties: {
-            category: {
-              type: SchemaType.STRING,
-              enum: ALLOWED_CATEGORIES,
-            },
-            title: { type: SchemaType.STRING },
-            description: { type: SchemaType.STRING },
-            confidence: { type: SchemaType.STRING },
-            isCivicIssue: { type: SchemaType.BOOLEAN },
-          },
-          required: [
-            "category",
-            "title",
-            "description",
-            "confidence",
-            "isCivicIssue",
-          ],
-        },
-      },
-    });
-
+    const genAI = new GoogleGenerativeAI(apiKey);
     const imageBuffer = fs.readFileSync(req.file.path);
     const imagePart = {
       inlineData: {
@@ -130,12 +141,66 @@ Rules:
 - Generate a concise, clear "title" (max 8 words) and a factual 2-sentence "description" describing the visible hazard and why municipal action is needed.
 - Set "confidence" to "High", "Medium", or "Low", and "isCivicIssue" to false only if the photo is completely unrelated to civic infrastructure.`;
 
-    const result = await model.generateContent([prompt, imagePart]);
-    const analysis = JSON.parse(result.response.text());
+    const tryModel = async (modelName) => {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: SchemaType.OBJECT,
+            properties: {
+              category: {
+                type: SchemaType.STRING,
+                enum: ALLOWED_CATEGORIES,
+              },
+              title: { type: SchemaType.STRING },
+              description: { type: SchemaType.STRING },
+              confidence: { type: SchemaType.STRING },
+              isCivicIssue: { type: SchemaType.BOOLEAN },
+            },
+            required: [
+              "category",
+              "title",
+              "description",
+              "confidence",
+              "isCivicIssue",
+            ],
+          },
+        },
+      });
+      return await model.generateContent([prompt, imagePart]);
+    };
 
-    // Remove temporary preview file after analysis; final submit uploads the form image
+    let result = null;
+    let lastError = null;
+
+    // 1. Try primary recommended model first
+    try {
+      result = await tryModel("gemini-3.8-flash");
+    } catch (err) {
+      lastError = err;
+      // 2. Try all available lite/flash models on this key if primary hits 503
+      const dynamicModels = await getAvailableVisionModels(apiKey);
+      for (const fallbackModel of dynamicModels) {
+        if (fallbackModel === "gemini-3.8-flash") continue;
+        try {
+          result = await tryModel(fallbackModel);
+          break;
+        } catch (fallbackErr) {
+          lastError = fallbackErr;
+        }
+      }
+    }
+
     fs.unlink(req.file.path, () => {});
 
+    if (!result) {
+      throw (
+        lastError || new Error("No available Gemini vision model responded")
+      );
+    }
+
+    const analysis = JSON.parse(result.response.text());
     const safeCategory = ALLOWED_CATEGORIES.includes(analysis.category)
       ? analysis.category
       : "Other";
@@ -167,12 +232,10 @@ exports.createIssue = async (req, res) => {
     const image = req.file ? `/uploads/${req.file.filename}` : null;
 
     if (!title || !description || !category) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "Please provide all required fields (title, description, category)",
-        });
+      return res.status(400).json({
+        message:
+          "Please provide all required fields (title, description, category)",
+      });
     }
 
     let lat = null;
