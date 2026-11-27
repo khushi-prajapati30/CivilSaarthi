@@ -4,7 +4,19 @@ import { AuthContext } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import axios from 'axios';
 import { motion } from 'framer-motion';
-import { FaCloudUploadAlt, FaExclamationTriangle, FaMagic, FaCamera, FaCheckCircle, FaTimes } from 'react-icons/fa';
+import {
+  FaCloudUploadAlt,
+  FaExclamationTriangle,
+  FaMagic,
+  FaCamera,
+  FaCheckCircle,
+  FaTimes,
+  FaMapMarkerAlt,
+  FaCrosshairs,
+  FaEnvelope,
+  FaCopy,
+  FaPaperPlane,
+} from 'react-icons/fa';
 
 const PREDEFINED_CATEGORIES = [
   'Pothole',
@@ -26,13 +38,22 @@ const ReportIssue = () => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Pothole');
+  const [locationName, setLocationName] = useState('');
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
+  const [locating, setLocating] = useState(false);
+
   const [image, setImage] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiResult, setAiResult] = useState(null);
+
+  // Modals
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateInfo, setDuplicateInfo] = useState(null);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [submittedIssue, setSubmittedIssue] = useState(null);
 
   // Live Camera Modal States
   const [showCameraModal, setShowCameraModal] = useState(false);
@@ -44,7 +65,9 @@ const ReportIssue = () => {
     if (!user) {
       toast.error('Please login to report an issue');
       navigate('/login');
+      return;
     }
+    requestCurrentLocation(true);
   }, [user, navigate]);
 
   useEffect(() => {
@@ -53,6 +76,47 @@ const ReportIssue = () => {
       stopCameraStream();
     };
   }, [previewUrl]);
+
+  const requestCurrentLocation = (silent = false) => {
+    if (!navigator.geolocation) {
+      if (!silent) toast.error('Geolocation is not supported by your browser. Please enter location manually.');
+      return;
+    }
+
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude.toFixed(6);
+        const lon = pos.coords.longitude.toFixed(6);
+        setLatitude(lat);
+        setLongitude(lon);
+
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`
+          );
+          const geo = await res.json();
+          if (geo?.display_name) {
+            setLocationName(geo.display_name);
+          } else {
+            setLocationName(`GPS: ${lat}, ${lon} (Mathura-Vrindavan)`);
+          }
+        } catch {
+          setLocationName(`GPS: ${lat}, ${lon} (Mathura-Vrindavan)`);
+        }
+
+        setLocating(false);
+        if (!silent) toast.success('Current GPS location captured!');
+      },
+      () => {
+        setLocating(false);
+        if (!silent) {
+          toast.info('Location permission denied — please type your landmark or area manually below.');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
 
   const stopCameraStream = () => {
     if (streamRef.current) {
@@ -75,7 +139,7 @@ const ReportIssue = () => {
           videoRef.current.srcObject = stream;
         }
       }, 100);
-    } catch (err) {
+    } catch {
       toast.error('Camera access denied or unavailable on this device.');
     }
   };
@@ -118,6 +182,7 @@ const ReportIssue = () => {
     setAnalyzing(true);
     try {
       const config = {
+        timeout: 30000,
         headers: {
           'Content-Type': 'multipart/form-data',
           Authorization: `Bearer ${user.token}`,
@@ -138,7 +203,6 @@ const ReportIssue = () => {
       }
     } catch (error) {
       const exactError = error.response?.data?.error || error.response?.data?.message || error.message;
-      console.error('AI Analyze Error:', error.response?.data || error);
       toast.error(`AI Detection Error: ${exactError}`);
     } finally {
       setAnalyzing(false);
@@ -157,6 +221,9 @@ const ReportIssue = () => {
     formData.append('title', title);
     formData.append('description', description);
     formData.append('category', category);
+    formData.append('locationName', locationName || 'Mathura-Vrindavan, Uttar Pradesh');
+    if (latitude) formData.append('latitude', latitude);
+    if (longitude) formData.append('longitude', longitude);
     if (image) {
       formData.append('image', image);
     }
@@ -176,13 +243,60 @@ const ReportIssue = () => {
         setShowDuplicateModal(true);
       } else {
         toast.success(res.data.message || 'Issue reported successfully');
-        navigate('/dashboard');
+        setSubmittedIssue(res.data.issue);
+        setShowEmailModal(true);
       }
     } catch (error) {
       toast.error(error.response?.data?.message || 'Error reporting issue');
     } finally {
       setLoading(false);
     }
+  };
+
+  const buildEmailDraft = (issue) => {
+    if (!issue) return { to: '', subject: '', body: '' };
+    const to = issue.authorityEmail || 'khushikprajapati9053@gmail.com';
+    const subject = `Civic Grievance [${issue.category}]: ${issue.title} - Mathura-Vrindavan`;
+    const mapLink =
+      issue.latitude && issue.longitude
+        ? `https://www.google.com/maps?q=${issue.latitude},${issue.longitude}`
+        : 'Coordinates not attached (manual landmark provided)';
+
+    const body = `Respected Officer (${issue.department}),
+
+I am writing to report an urgent civic issue in Mathura-Vrindavan that requires immediate municipal inspection and resolution.
+
+• Complaint ID: ${issue._id}
+• Problem Category: ${issue.category}
+• Issue Title: ${issue.title}
+• Exact Location / Landmark: ${issue.locationName || 'Mathura-Vrindavan, UP'}
+• Google Maps Pin: ${mapLink}
+
+Detailed Description:
+${issue.description}
+
+Please take necessary action at the earliest and reply once resolved so we can verify and close this civic complaint on CivilSaarthi.
+
+Sincerely,
+${user?.name || 'Concerned Citizen'}
+${user?.email || ''}`;
+
+    return { to, subject, body };
+  };
+
+  const handleCopyEmail = () => {
+    const draft = buildEmailDraft(submittedIssue);
+    const fullText = `To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`;
+    navigator.clipboard.writeText(fullText);
+    toast.success('Official grievance email copied to clipboard!');
+  };
+
+  const handleDirectEmailSend = () => {
+    const draft = buildEmailDraft(submittedIssue);
+    const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+      draft.to
+    )}&su=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`;
+    window.open(gmailComposeUrl, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -208,13 +322,14 @@ const ReportIssue = () => {
                 Report an Issue
               </h2>
               <p className="dark:text-orange-200/60 text-orange-800 mt-1 font-medium">
-                Upload or capture a live photo for automatic AI problem detection, or select from predefined categories below.
+                Snap a photo for AI detection, capture GPS or manual location, and generate an official authority email.
               </p>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="max-w-2xl mx-auto space-y-8 relative z-10">
             <div className="space-y-6">
+              {/* Step 1: Photo Capture / Upload */}
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-sm font-bold dark:text-orange-200 text-orange-950 uppercase tracking-wide">
@@ -257,7 +372,6 @@ const ReportIssue = () => {
                     </div>
                   </div>
 
-                  {/* Direct Live Camera Trigger Button */}
                   <button
                     type="button"
                     onClick={openLiveCamera}
@@ -290,10 +404,48 @@ const ReportIssue = () => {
                 )}
               </div>
 
+              {/* Step 2: Location (GPS Auto-Fill + Manual Fallback) */}
+              <div>
+                <div className="flex flex-wrap justify-between items-center gap-2 mb-2">
+                  <label className="block text-sm font-bold dark:text-orange-200 text-orange-950 uppercase tracking-wide flex items-center gap-1.5">
+                    <FaMapMarkerAlt className="text-orange-500" /> 2. Issue Location (Mathura-Vrindavan)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => requestCurrentLocation(false)}
+                    disabled={locating}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-600 dark:text-orange-300 border border-orange-500/40 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <FaCrosshairs className={locating ? 'animate-spin' : ''} />
+                    {locating ? 'Detecting GPS...' : 'Use Current GPS Location'}
+                  </button>
+                </div>
+
+                <input
+                  type="text"
+                  required
+                  className="w-full px-5 py-4 dark:bg-orange-950/40 bg-white border dark:border-orange-500/30 border-orange-200 rounded-xl dark:text-white text-slate-900 placeholder-slate-400 dark:placeholder-orange-300/30 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 transition-all shadow-inner"
+                  placeholder="Enter exact landmark or address (e.g., Near Banke Bihari Temple, Vrindavan)"
+                  value={locationName}
+                  onChange={(e) => setLocationName(e.target.value)}
+                />
+
+                {latitude && longitude ? (
+                  <p className="mt-1.5 text-xs font-mono text-emerald-600 dark:text-emerald-400">
+                    ✓ GPS Coordinates locked: {latitude}, {longitude} (will show as a Red Pin on Mathura-Vrindavan Map)
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-xs dark:text-orange-200/60 text-slate-500">
+                    Location permission not granted? You can type any street, ghat, or colony name above.
+                  </p>
+                )}
+              </div>
+
+              {/* Step 3: Predefined Category Override */}
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-sm font-bold dark:text-orange-200 text-orange-950 uppercase tracking-wide">
-                    2. Problem Category (Predefined Override)
+                    3. Problem Category (Predefined Override)
                   </label>
                   <span className="text-xs dark:text-orange-300/70 text-orange-700 font-medium">
                     Editable if AI misclassifies
@@ -323,9 +475,10 @@ const ReportIssue = () => {
                 </div>
               </div>
 
+              {/* Step 4: Issue Title */}
               <div>
                 <label className="block text-sm font-bold dark:text-orange-200 text-orange-950 mb-2 uppercase tracking-wide">
-                  3. Issue Title
+                  4. Issue Title
                 </label>
                 <input
                   type="text"
@@ -337,13 +490,14 @@ const ReportIssue = () => {
                 />
               </div>
 
+              {/* Step 5: Description */}
               <div>
                 <label className="block text-sm font-bold dark:text-orange-200 text-orange-950 mb-2 uppercase tracking-wide">
-                  4. Description
+                  5. Description
                 </label>
                 <textarea
                   required
-                  rows="5"
+                  rows="4"
                   className="w-full px-5 py-4 dark:bg-orange-950/40 bg-white border dark:border-orange-500/30 border-orange-200 rounded-xl dark:text-white text-slate-900 placeholder-slate-400 dark:placeholder-orange-300/30 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 transition-all shadow-inner resize-none"
                   placeholder="Provide specific details to help the maintenance team..."
                   value={description}
@@ -364,11 +518,11 @@ const ReportIssue = () => {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Processing...
+                    Submitting...
                   </span>
                 ) : (
                   <>
-                    Submit Report{' '}
+                    Submit & Generate Authority Email{' '}
                     <svg className="w-6 h-6 ml-2 group-hover:translate-x-2 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
                     </svg>
@@ -379,6 +533,97 @@ const ReportIssue = () => {
           </form>
         </motion.div>
       </div>
+
+      {/* Official Authority Email Modal (Next Step After Reporting) */}
+      {showEmailModal && submittedIssue && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+          <motion.div
+            initial={{ scale: 0.92, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="max-w-2xl w-full dark:bg-slate-900 bg-white border-2 border-orange-500 rounded-3xl p-6 md:p-8 shadow-2xl space-y-5 text-left max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between border-b dark:border-slate-700 border-slate-200 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-orange-500 to-pink-600 flex items-center justify-center text-white text-xl">
+                  <FaEnvelope />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black dark:text-white text-slate-900">
+                    Next Step: Notify {submittedIssue.department}
+                  </h3>
+                  <p className="text-xs dark:text-slate-400 text-slate-600">
+                    Copy this official grievance email or open it directly in your mail app.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEmailModal(false);
+                  navigate('/dashboard');
+                }}
+                className="text-slate-400 hover:text-red-500 p-1 cursor-pointer"
+              >
+                <FaTimes className="text-xl" />
+              </button>
+            </div>
+
+            {(() => {
+              const draft = buildEmailDraft(submittedIssue);
+              return (
+                <div className="space-y-3">
+                  <div className="dark:bg-slate-800/80 bg-slate-100 p-3 rounded-xl border dark:border-slate-700 border-slate-200 text-xs space-y-1">
+                    <p className="dark:text-slate-300 text-slate-800">
+                      <strong>To Authority Email:</strong>{' '}
+                      <span className="font-mono text-orange-500 font-bold">{draft.to}</span>
+                    </p>
+                    <p className="dark:text-slate-300 text-slate-800">
+                      <strong>Subject:</strong> {draft.subject}
+                    </p>
+                  </div>
+
+                  <textarea
+                    readOnly
+                    rows="10"
+                    value={draft.body}
+                    className="w-full p-4 rounded-xl dark:bg-slate-950 bg-slate-50 border dark:border-slate-700 border-slate-300 dark:text-slate-200 text-slate-800 font-mono text-xs leading-relaxed focus:outline-none"
+                  />
+                </div>
+              );
+            })()}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleCopyEmail}
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl dark:bg-slate-800 bg-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700 dark:text-white text-slate-900 font-bold text-sm transition-all cursor-pointer"
+                >
+                  <FaCopy /> Copy Email Text
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDirectEmailSend}
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-pink-600 hover:from-orange-400 hover:to-pink-500 text-white font-bold text-sm shadow-lg transition-all cursor-pointer"
+                >
+                  <FaPaperPlane /> Send Directly via Email App
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEmailModal(false);
+                  navigate('/dashboard');
+                }}
+                className="px-4 py-3 rounded-xl text-xs font-bold dark:text-slate-400 text-slate-600 hover:text-orange-500 cursor-pointer"
+              >
+                Go to Dashboard →
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* Live Camera Capture Modal */}
       {showCameraModal && (
@@ -432,8 +677,6 @@ const ReportIssue = () => {
             animate={{ scale: 1, opacity: 1 }}
             className="max-w-md w-full dark:bg-slate-900 bg-white border-2 dark:border-orange-500 border-orange-300 rounded-3xl p-8 shadow-[0_0_50px_rgba(249,115,22,0.3)] relative overflow-hidden text-left"
           >
-            <div className="absolute top-[-20%] left-[-20%] w-48 h-48 bg-orange-500 rounded-full blur-[80px] dark:opacity-30 opacity-10"></div>
-
             <div className="text-center relative z-10">
               <div className="w-16 h-16 bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-full flex items-center justify-center mx-auto mb-6 text-3xl animate-bounce">
                 <FaExclamationTriangle />
@@ -455,31 +698,10 @@ const ReportIssue = () => {
                     {duplicateInfo.category}
                   </span>
                 </div>
-                <div className="flex justify-between items-center pb-3 border-b dark:border-slate-700/50 border-slate-200">
+                <div className="flex justify-between items-center">
                   <span className="dark:text-slate-400 text-slate-600 text-sm">Reports Count</span>
                   <span className="bg-pink-500/20 text-pink-650 dark:text-pink-400 border border-pink-500/30 px-3 py-0.5 rounded-full text-sm font-black">
                     {duplicateInfo.reportsCount} reports
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="dark:text-slate-400 text-slate-600 text-sm">System Priority</span>
-                  <span
-                    className={`px-3 py-0.5 rounded-full text-xs font-bold border ${duplicateInfo.priority <= 2
-                        ? 'bg-green-500/20 text-green-700 dark:text-green-300 border-green-500/30'
-                        : duplicateInfo.priority <= 4
-                          ? 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-300 border-yellow-500/30'
-                          : duplicateInfo.priority <= 6
-                            ? 'bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-500/30'
-                            : 'bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/30 font-bold'
-                      }`}
-                  >
-                    {duplicateInfo.priority <= 2
-                      ? '🟢 Low'
-                      : duplicateInfo.priority <= 4
-                        ? '🟡 Medium'
-                        : duplicateInfo.priority <= 6
-                          ? '🟠 High'
-                          : '🔴 Critical'}
                   </span>
                 </div>
               </div>
