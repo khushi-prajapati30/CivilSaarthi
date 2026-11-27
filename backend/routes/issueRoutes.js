@@ -6,6 +6,7 @@ const {
   getMyIssues,
   updateIssueStatus,
   analyzeIssueImage,
+  resolveIssue,
 } = require("../controllers/issueController");
 const { protect, admin } = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
@@ -25,6 +26,8 @@ router
 router.route("/all").get(getIssues);
 
 router.route("/myissues").get(protect, getMyIssues);
+
+router.route("/:id/resolve").put(protect, resolveIssue);
 
 router.route("/:id/status").put(protect, admin, updateIssueStatus);
 

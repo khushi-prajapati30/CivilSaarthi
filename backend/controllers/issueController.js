@@ -15,9 +15,8 @@ const ALLOWED_CATEGORIES = [
   "Other",
 ];
 
-// Haversine formula to calculate distance between two coordinates in meters
 function getDistanceFromLatLonInM(lat1, lon1, lat2, lon2) {
-  var R = 6371e3; // Radius of the earth in m
+  var R = 6371e3;
   var dLat = deg2rad(lat2 - lat1);
   var dLon = deg2rad(lon2 - lon1);
   var a =
@@ -27,15 +26,13 @@ function getDistanceFromLatLonInM(lat1, lon1, lat2, lon2) {
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
   var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  var d = R * c; // Distance in m
-  return d;
+  return R * c;
 }
 
 function deg2rad(deg) {
   return deg * (Math.PI / 180);
 }
 
-// Logic to determine Priority based on reportsCount
 function calculatePriority(count) {
   if (count === 1) return 1;
   if (count === 2) return 4;
@@ -43,29 +40,45 @@ function calculatePriority(count) {
   return 8;
 }
 
-// Logic to determine Department based on category (Mathura-Vrindavan civic bodies)
-function getDepartment(category) {
+function getDepartmentInfo(category) {
   switch (category) {
     case "Pothole":
     case "Damaged Road":
-      return "PWD / Road Department";
+      return {
+        department: "PWD / Road Department",
+        authorityEmail: "khushikprajapati9053@gmail.com",
+      };
+    case "Water Leakage":
+    case "Drainage / Sewage":
+      return {
+        department: "Jal Kal / Water & Sewage Department",
+        authorityEmail: "khushikprajapati9053@gmail.com",
+      };
     case "Garbage":
     case "Dirty Washroom":
     case "Stray Animals":
-      return "Nagar Nigam Sanitation Department";
-    case "Water Leakage":
-    case "Drainage / Sewage":
-      return "Jal Kal / Water & Sewage Department";
+      return {
+        department: "Nagar Nigam Sanitation Department",
+        authorityEmail: "mishraprashantpm2005@gmail.com",
+      };
     case "Streetlight":
-      return "Electricity / Streetlight Department";
+      return {
+        department: "Electricity / Streetlight Department",
+        authorityEmail: "mishraprashantpm2005@gmail.com",
+      };
     case "Encroachment":
-      return "MVDA / Enforcement Department";
+      return {
+        department: "MVDA / Enforcement Department",
+        authorityEmail: "mishraprashantpm2005@gmail.com",
+      };
     default:
-      return "General Maintenance";
+      return {
+        department: "General Maintenance",
+        authorityEmail: "mishraprashantpm2005@gmail.com",
+      };
   }
 }
 
-// Helper: fetch available generateContent models, prioritizing fast/lite models less prone to 503 spikes
 async function getAvailableVisionModels(apiKey) {
   try {
     const response = await fetch(
@@ -87,7 +100,6 @@ async function getAvailableVisionModels(apiKey) {
       )
       .map((m) => m.name.replace("models/", ""));
 
-    // Prioritize 'lite' and '2.0-flash' models before congested 'latest' or 'pro' models
     return valid.sort((a, b) => {
       const score = (name) => {
         if (name.includes("lite")) return 1;
@@ -174,14 +186,12 @@ Rules:
     let result = null;
     let lastError = null;
 
-    // 1. Try primary recommended model first
     try {
       result = await tryModel("gemini-3.8-flash");
     } catch (err) {
       lastError = err;
-      // 2. Try all available lite/flash models on this key if primary hits 503
       const dynamicModels = await getAvailableVisionModels(apiKey);
-      for (const fallbackModel of dynamicModels) {
+      for (const fallbackModel of dynamicModels.slice(0, 3)) {
         if (fallbackModel === "gemini-3.8-flash") continue;
         try {
           result = await tryModel(fallbackModel);
@@ -204,12 +214,14 @@ Rules:
     const safeCategory = ALLOWED_CATEGORIES.includes(analysis.category)
       ? analysis.category
       : "Other";
+    const deptInfo = getDepartmentInfo(safeCategory);
 
     return res.status(200).json({
       category: safeCategory,
       title: analysis.title,
       description: analysis.description,
-      department: getDepartment(safeCategory),
+      department: deptInfo.department,
+      authorityEmail: deptInfo.authorityEmail,
       confidence: analysis.confidence || "Medium",
       isCivicIssue: analysis.isCivicIssue !== false,
     });
@@ -228,7 +240,8 @@ Rules:
 // @access  Private
 exports.createIssue = async (req, res) => {
   try {
-    const { title, description, category, latitude, longitude } = req.body;
+    const { title, description, category, locationName, latitude, longitude } =
+      req.body;
     const image = req.file ? `/uploads/${req.file.filename}` : null;
 
     if (!title || !description || !category) {
@@ -294,17 +307,19 @@ exports.createIssue = async (req, res) => {
       });
     }
 
-    const department = getDepartment(category);
+    const deptInfo = getDepartmentInfo(category);
     const priority = calculatePriority(1);
 
     const newIssue = await Issue.create({
       title,
       description,
       category,
+      locationName: locationName?.trim() || "Mathura-Vrindavan, Uttar Pradesh",
       latitude: lat,
       longitude: lon,
       image,
-      department,
+      department: deptInfo.department,
+      authorityEmail: deptInfo.authorityEmail,
       priority,
       user: req.user.id,
     });
@@ -361,6 +376,30 @@ exports.updateIssueStatus = async (req, res) => {
     issue.status = status;
     const updatedIssue = await issue.save();
     res.json(updatedIssue);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// @desc    Citizen / Reporter verification to mark an issue as Completed (Resolved)
+// @route   PUT /api/issues/:id/resolve
+// @access  Private
+exports.resolveIssue = async (req, res) => {
+  try {
+    const issue = await Issue.findById(req.params.id);
+
+    if (!issue) {
+      return res.status(404).json({ message: "Issue not found" });
+    }
+
+    issue.status = "Resolved";
+    issue.resolvedBy = req.user.id;
+    const updatedIssue = await issue.save();
+
+    res.json({
+      message: "Issue verified and marked as Completed!",
+      issue: updatedIssue,
+    });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }

@@ -26,6 +26,10 @@ const issueSchema = new mongoose.Schema(
         "Other",
       ],
     },
+    locationName: {
+      type: String,
+      default: "Mathura-Vrindavan, Uttar Pradesh",
+    },
     latitude: {
       type: Number,
       required: false,
@@ -47,6 +51,10 @@ const issueSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    authorityEmail: {
+      type: String,
+      default: "khushikprajapati9053@gmail.com",
+    },
     priority: {
       type: Number,
       default: 1,
@@ -54,6 +62,11 @@ const issueSchema = new mongoose.Schema(
     reportsCount: {
       type: Number,
       default: 1,
+    },
+    resolvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: false,
     },
     user: {
       type: mongoose.Schema.Types.ObjectId,
